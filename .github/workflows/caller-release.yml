@@ -1,0 +1,67 @@
+name: Caller CI/CD Release
+
+on:
+  push:
+    branches:
+      - "release/*"
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Selecione a ação desejada:"
+        required: true
+        default: "Build & Deploy HOM"
+        type: choice
+        options:
+          - "Build Only"
+          - "Build & Deploy HOM"
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Linter
+        run: npm run lint
+
+      - name: Run Unit Tests
+        run: npm run test:cov
+
+      - name: Build NestJS App
+        run: npm run build
+
+      # Aqui entraria a geração do artefato (ex: upload para o AWS ECR ou empacotamento)
+      # para garantir que o mesmo pacote gerado aqui seja o que vai para HOM e PROD.
+
+  deploy-hom:
+    name: Deploy to HOM
+    needs: build-and-test
+    # Só executa se for push em release/* ou se for acionado manualmente para Deploy
+    if: github.event_name == 'push' || inputs.action == 'Build & Deploy HOM'
+    runs-on: ubuntu-latest
+
+    # É ESTA LINHA QUE ACIONA A TELA DE APROVAÇÃO DO GITHUB:
+    environment:
+      name: HOM
+
+    steps:
+      - name: Start Deploy
+        run: |
+          echo "🚀 Deploy aprovado! Iniciando processo em HOM..."
+
+      # Aqui entram os scripts de deploy (como aquele curl para a API do Render que você usou no Sandbox)
+
+      - name: Deploy Summary
+        if: success()
+        run: |
+          echo "### ✅ Deploy HOM Concluído!" >> $GITHUB_STEP_SUMMARY
+          echo "A aplicação foi atualizada no ambiente de Homologação." >> $GITHUB_STEP_SUMMARY
