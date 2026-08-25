@@ -31,9 +31,8 @@ jobs:
     steps:
       - name: Validate Release/Main Branch
         run: |
-          if [[ "${{ github.ref }}" != refs/heads/release/* && "${{ github.ref }}" != refs/heads/main ]]; then
-            echo "❌ ERRO: O fluxo de Release NÃO PODE ser acionado a partir desta branch." >> $GITHUB_STEP_SUMMARY
-            echo "Use apenas a branch 'main' ou branches do tipo 'release/*'." >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ github.ref }}" != refs/heads/release/* && "${{ github.ref }}" != refs/heads/main && "${{ github.ref }}" != refs/heads/develop ]]; then
+            echo "Branch inválida para o fluxo de Release. Use apenas 'main', 'develop' ou 'release/*'."
             exit 1
           fi
           echo "✅ Branch validada com sucesso."
