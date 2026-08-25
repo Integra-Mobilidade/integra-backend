@@ -23,10 +23,27 @@ on:
 
 jobs:
   # ---------------------------------------------------
+  # 0. GATEKEEPER (Validação de Branch)
+  # ---------------------------------------------------
+  validate-branch:
+    name: Check Branch Validity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate Release/Main Branch
+        run: |
+          if [[ "${{ github.ref }}" != refs/heads/release/* && "${{ github.ref }}" != refs/heads/main ]]; then
+            echo "❌ ERRO: O fluxo de Release NÃO PODE ser acionado a partir desta branch." >> $GITHUB_STEP_SUMMARY
+            echo "Use apenas a branch 'main' ou branches do tipo 'release/*'." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          echo "✅ Branch validada com sucesso."
+
+  # ---------------------------------------------------
   # 1. BUILD
   # ---------------------------------------------------
   build:
     name: Build Application
+    needs: validate-branch
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
