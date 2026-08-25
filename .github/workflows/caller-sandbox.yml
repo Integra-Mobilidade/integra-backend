@@ -25,21 +25,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: "npm"
-          
+
       - name: Install Dependencies
         run: npm ci
-        
+
       - name: Run Linter
         run: npm run lint
-        
+
       - name: Build Application
         run: npm run build
-        
+
       - name: Unit Tests & Coverage
         run: npm run test:cov | tee coverage_output.txt
 
@@ -59,12 +59,12 @@ jobs:
     # Executa se for push na develop OU se a ação selecionada manualmente for de Deploy
     if: github.event_name == 'push' || inputs.action == 'Build & Deploy'
     runs-on: ubuntu-latest
-    
+
     # Mapeia para o environment no GitHub
-    environment: 
+    environment:
       name: DEV
       # url: https://sua-api-dev.onrender.com (opcional, cria um botão de acesso no log do GH Actions)
-      
+
     steps:
       - name: Start and wait for Deploy (Render)
         env:
@@ -73,14 +73,19 @@ jobs:
         run: |
           echo "Acionando a API do Render para o serviço ${{ secrets.RENDER_SERVICE_ID }}..."
 
+          # O 'Bearer ' antes da variável é obrigatório para a API do Render aceitar
           RESPONSE=$(curl -s -X POST "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys" \
             -H "Authorization: Bearer $RENDER_API_KEY" \
             -H "Accept: application/json")
+
+          # Imprime a resposta para facilitar o debug caso a API recuse a chamada
+          echo "Resposta bruta do Render: $RESPONSE"
             
           DEPLOY_ID=$(echo $RESPONSE | jq -r '.id')
 
+          # Se o ID vier como null ou erro (porque a resposta não era o JSON esperado)
           if [ "$DEPLOY_ID" == "null" ] || [ -z "$DEPLOY_ID" ]; then
-            echo "❌ Erro ao acionar deploy: $RESPONSE"
+            echo "❌ Erro ao acionar deploy. Verifique o log 'Resposta bruta' acima para entender o motivo."
             exit 1
           fi
 
@@ -103,7 +108,6 @@ jobs:
             echo "❌ O deploy falhou no Render com o status: $STATUS"
             exit 1
           fi
-
       - name: Deploy Summary
         if: success()
         run: |
