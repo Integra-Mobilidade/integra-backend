@@ -41,7 +41,7 @@ jobs:
         run: npm run build
 
   # ---------------------------------------------------
-  # 2A. TESTS (Em paralelo ao Sonar)
+  # 2A. TESTS (Paralelo ao Sonar)
   # ---------------------------------------------------
   test:
     name: Run Tests
@@ -83,7 +83,7 @@ jobs:
           retention-days: 1
 
   # ---------------------------------------------------
-  # 2B. SONARQUBE (Em paralelo aos testes)
+  # 2B. SONARQUBE (Paralelo aos testes)
   # ---------------------------------------------------
   sonar:
     name: SonarQube Scan
@@ -100,8 +100,6 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
-          # Nota: Como roda em paralelo, o Sonar não vai ler o lcov.info gerado no step 'test' simultaneamente.
-          # Ele fará apenas a validação de Code Smells e vulnerabilidades estáticas.
           args: >
             -Dsonar.projectKey=${{ github.repository_owner }}_${{ github.event.repository.name }}
 
@@ -120,7 +118,6 @@ jobs:
   deploy-dev:
     name: Deploy to DEV
     needs: [test, sonar]
-    # Trava rigorosa: Só segue se o TEST passar e o SONAR passar (ou for pulado pelo input)
     if: |
       always() &&
       needs.test.result == 'success' &&
@@ -129,12 +126,13 @@ jobs:
     runs-on: ubuntu-latest
     environment: DEV
     steps:
-      - name: Start and Wait for Render
+      - name: 🚀 Acionar Render API
+        id: trigger-deploy
         env:
           RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
         run: |
-          echo "Acionando a API do Render..."
+          echo "Acionando a API do Render para o ambiente DEV..."
           RESPONSE=$(curl -s -X POST "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys" \
             -H "Authorization: Bearer $RENDER_API_KEY" \
             -H "Accept: application/json")
@@ -142,12 +140,19 @@ jobs:
           DEPLOY_ID=$(echo $RESPONSE | jq -r '.id')
 
           if [ "$DEPLOY_ID" == "null" ] || [ -z "$DEPLOY_ID" ]; then
-            echo "❌ Erro ao acionar deploy."
+            echo "❌ Erro ao acionar deploy. Resposta bruta: $RESPONSE"
             exit 1
           fi
 
+          echo "DEPLOY_ID=$DEPLOY_ID" >> $GITHUB_ENV
+          echo "✅ Deploy acionado com sucesso (ID: $DEPLOY_ID)."
+
+      - name: ⏳ Aguardar Servidor Online
+        env:
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+        run: |
           STATUS="created"
-          # Loop com identificação visual de progresso pulsante no console
           while [ "$STATUS" == "created" ] || [ "$STATUS" == "build_in_progress" ] || [ "$STATUS" == "update_in_progress" ]; do
             echo "🔄 [$(date +'%H:%M:%S')] O Render está trabalhando... Status atual: $STATUS"
             sleep 15
@@ -158,60 +163,13 @@ jobs:
           done
 
           if [ "$STATUS" == "live" ]; then
-            echo "🎉 [$(date +'%H:%M:%S')] Deploy concluído com sucesso!"
+            echo "🎉 [$(date +'%H:%M:%S')] Deploy concluído com sucesso no Render!"
             exit 0
           else
-            echo "❌ [$(date +'%H:%M:%S')] Falha no Render. Status: $STATUS"
+            echo "❌ [$(date +'%H:%M:%S')] Falha no Render. Status final: $STATUS"
             exit 1
           fi
 
-      - name: Deploy DEV Summary
+      - name: 📝 Deploy DEV Summary
         if: success()
         run: echo "### 🚀 Eventer-API atualizado com sucesso no ambiente DEV!" >> $GITHUB_STEP_SUMMARY
-
-  # ---------------------------------------------------
-  # 4. DEPLOY HOM (Automático após DEV se for release)
-  # ---------------------------------------------------
-  deploy-hom:
-    name: Deploy to HOM
-    needs: deploy-dev
-    # Aciona automaticamente APENAS se a branch for release/*
-    if: startsWith(github.ref, 'refs/heads/release/')
-    runs-on: ubuntu-latest
-    environment: HOM # A trava "Required reviewers" pausa a esteira aqui!
-    steps:
-      - name: Start and Wait for Render (HOM)
-        env:
-          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID_HOM }}
-          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
-        run: |
-          echo "✅ Aprovação recebida! Iniciando deploy em Homologação..."
-
-          # Repetição do bloco de deploy apontando para o Service ID de HOM
-          RESPONSE=$(curl -s -X POST "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys" \
-            -H "Authorization: Bearer $RENDER_API_KEY" \
-            -H "Accept: application/json")
-            
-          DEPLOY_ID=$(echo $RESPONSE | jq -r '.id')
-
-          if [ "$DEPLOY_ID" == "null" ] || [ -z "$DEPLOY_ID" ]; then
-            exit 1
-          fi
-
-          STATUS="created"
-          while [ "$STATUS" == "created" ] || [ "$STATUS" == "build_in_progress" ] || [ "$STATUS" == "update_in_progress" ]; do
-            echo "🔄 [$(date +'%H:%M:%S')] Status atual em HOM: $STATUS"
-            sleep 15
-            STATUS_RESPONSE=$(curl -s -X GET "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys/$DEPLOY_ID" \
-              -H "Authorization: Bearer $RENDER_API_KEY" \
-              -H "Accept: application/json")
-            STATUS=$(echo $STATUS_RESPONSE | jq -r '.status')
-          done
-
-          if [ "$STATUS" != "live" ]; then
-            exit 1
-          fi
-
-      - name: Deploy HOM Summary
-        if: success()
-        run: echo "### 🔒 Eventer-API atualizado com sucesso no ambiente HOM!" >> $GITHUB_STEP_SUMMARY

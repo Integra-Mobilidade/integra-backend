@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - "release/*"
   workflow_dispatch:
     inputs:
       action:
@@ -42,7 +43,7 @@ jobs:
         run: npm run build
 
   # ---------------------------------------------------
-  # 2A. TESTS (Em paralelo)
+  # 2A. TESTS
   # ---------------------------------------------------
   test:
     name: Run Tests
@@ -84,7 +85,7 @@ jobs:
           retention-days: 1
 
   # ---------------------------------------------------
-  # 2B. SONARQUBE (Em paralelo)
+  # 2B. SONARQUBE
   # ---------------------------------------------------
   sonar:
     name: SonarQube Scan
@@ -119,16 +120,16 @@ jobs:
   deploy-hom:
     name: Deploy to HOM
     needs: [test, sonar]
-    # Executa se: Testes e Sonar passaram E (é um push OU usuário pediu deploy HOM/PROD manualmente)
     if: |
       always() &&
       needs.test.result == 'success' &&
       (needs.sonar.result == 'success' || needs.sonar.result == 'skipped') &&
       (github.event_name == 'push' || inputs.action == 'Build & Deploy HOM' || inputs.action == 'Build & Deploy PROD')
     runs-on: ubuntu-latest
-    environment: HOM # AQUI O GITHUB PAUSA E EXIGE A APROVAÇÃO (Required Reviewers)
+    environment: HOM
     steps:
-      - name: Start and Wait for Render
+      - name: 🚀 Acionar Render API (HOM)
+        id: trigger-deploy-hom
         env:
           RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
@@ -141,10 +142,18 @@ jobs:
           DEPLOY_ID=$(echo $RESPONSE | jq -r '.id')
 
           if [ "$DEPLOY_ID" == "null" ] || [ -z "$DEPLOY_ID" ]; then
-            echo "❌ Erro ao acionar deploy."
+            echo "❌ Erro ao acionar deploy. Resposta: $RESPONSE"
             exit 1
           fi
 
+          echo "DEPLOY_ID=$DEPLOY_ID" >> $GITHUB_ENV
+          echo "✅ Deploy acionado com sucesso (ID: $DEPLOY_ID)."
+
+      - name: ⏳ Aguardar Servidor Online (HOM)
+        env:
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+        run: |
           STATUS="created"
           while [ "$STATUS" == "created" ] || [ "$STATUS" == "build_in_progress" ] || [ "$STATUS" == "update_in_progress" ]; do
             echo "🔄 [$(date +'%H:%M:%S')] O Render está trabalhando... Status atual em HOM: $STATUS"
@@ -163,7 +172,7 @@ jobs:
             exit 1
           fi
 
-      - name: Deploy HOM Summary
+      - name: 📝 Deploy HOM Summary
         if: success()
         run: echo "### 🔒 O projeto Eventer-API foi atualizado com sucesso no ambiente de Homologação (HOM)!" >> $GITHUB_STEP_SUMMARY
 
@@ -173,15 +182,15 @@ jobs:
   deploy-prod:
     name: Deploy to PROD
     needs: deploy-hom
-    # Aciona após HOM APENAS se a branch for main, ou se o fluxo manual escolheu PROD
     if: |
       always() && 
       needs.deploy-hom.result == 'success' && 
       (github.ref == 'refs/heads/main' || inputs.action == 'Build & Deploy PROD')
     runs-on: ubuntu-latest
-    environment: PROD # AQUI O GITHUB PAUSA NOVAMENTE E EXIGE A APROVAÇÃO FINAL
+    environment: PROD
     steps:
-      - name: Start and Wait for Render
+      - name: 🚀 Acionar Render API (PROD)
+        id: trigger-deploy-prod
         env:
           RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
@@ -194,10 +203,18 @@ jobs:
           DEPLOY_ID=$(echo $RESPONSE | jq -r '.id')
 
           if [ "$DEPLOY_ID" == "null" ] || [ -z "$DEPLOY_ID" ]; then
-            echo "❌ Erro ao acionar deploy em Produção."
+            echo "❌ Erro ao acionar deploy em Produção. Resposta: $RESPONSE"
             exit 1
           fi
 
+          echo "DEPLOY_ID=$DEPLOY_ID" >> $GITHUB_ENV
+          echo "✅ Deploy acionado com sucesso (ID: $DEPLOY_ID)."
+
+      - name: ⏳ Aguardar Servidor Online (PROD)
+        env:
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+        run: |
           STATUS="created"
           while [ "$STATUS" == "created" ] || [ "$STATUS" == "build_in_progress" ] || [ "$STATUS" == "update_in_progress" ]; do
             echo "🔄 [$(date +'%H:%M:%S')] O Render está trabalhando... Status atual em PROD: $STATUS"
@@ -216,6 +233,6 @@ jobs:
             exit 1
           fi
 
-      - name: Deploy PROD Summary
+      - name: 📝 Deploy PROD Summary
         if: success()
         run: echo "### 🌎 O projeto Eventer-API está online em PRODUÇÃO!" >> $GITHUB_STEP_SUMMARY
